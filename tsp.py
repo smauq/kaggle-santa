@@ -1,11 +1,7 @@
-import pandas as pd
 import numpy as np
 from random import random, randint, shuffle
-from haversine import haversine
 
 def get_weariness(route, dist, weights):
-    # weight = sum(weights + 10)
-    
     weariness = 0
     for i in range(0,len(route)):
         weariness += dist[route[i]][route[i-1]]
@@ -52,7 +48,6 @@ def tsp_genetic(coord, weights, labels, n_pop=100, gen=100, mutation=0.4):
     for g in range(0,gen):
         fitness = pop_fitness(pop, dist, weights)
         best = np.argmin(fitness)
-        print fitness[best]
         
         # Evolve a new population
         new_pop = [pop[best]]
@@ -93,5 +88,3 @@ def tsp_genetic(coord, weights, labels, n_pop=100, gen=100, mutation=0.4):
     best = np.argmax(fitness)
         
     return (fitness[best], pop[best])
-
-gifts = pd.read_csv('gifts.csv').as_matrix()
