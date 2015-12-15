@@ -10,17 +10,18 @@ using namespace std;
 const int MAX_WEIGHT = 1000;
 const int SLEIGH_WEIGHT = 10;
 
-const int N_GIFTS = 100000;
+const int N_GIFTS = 10000;
 const int MAX_GIFTS = MAX_WEIGHT;
 
 const double NORTH_POLE[2] = {0.5 * M_PI, 0};
 const double EARTH_RADIUS = 6372.8;
 
-const int MAX_POP = 100;
+const int N_POP = 100;
+const int MUTATE = 40;
+const int TOURNAMENT = 7;
+const double TOLERANCE = 0.01;
 
-const int EPOCH_POP[] = {100};
-const int EPOCH_GEN[] = {0};
-const int EPOCH_NN[] = {7};
+const int NEIGHBOURS = 5;
 
 inline double haversine(const double c1[], const double c2[]){
 
@@ -47,7 +48,7 @@ inline double get_weariness(int route[], int n_gifts, double dist[][MAX_GIFTS],
     }
 
     weariness = weight * north[route[0]];
-    weight -= weights[route[route[0]]];
+    weight -= weights[route[0]];
 
     for(i = 1; i < n_gifts; i++){
 	weariness += dist[route[i]][route[i-1]] * weight;
@@ -59,12 +60,12 @@ inline double get_weariness(int route[], int n_gifts, double dist[][MAX_GIFTS],
     return weariness;
 }
 
-inline int pop_fitness(int pop[][MAX_GIFTS], int n_pop, int n_gifts, double dist[][MAX_GIFTS], 
+inline int pop_fitness(int pop[][MAX_GIFTS], int n_gifts, double dist[][MAX_GIFTS], 
 		       double north[], double weights[], double fitness[]){
 
     int best = 0;
 
-    for(int i = 0; i < n_pop; i++){
+    for(int i = 0; i < N_POP; i++){
 	fitness[i] = get_weariness(pop[i], n_gifts, dist, north, weights);
 
 	if(fitness[i] < fitness[best]){
@@ -76,12 +77,12 @@ inline int pop_fitness(int pop[][MAX_GIFTS], int n_pop, int n_gifts, double dist
 
 }
 
-inline int tournament(double fitness[], int n_pop, int size, default_random_engine &generator){
+inline int tournament(double fitness[], default_random_engine &generator){
 
     int best, idx;
 
-    for(int i = 0; i < size; i++){
-	idx = generator() % n_pop;
+    for(int i = 0; i < TOURNAMENT; i++){
+	idx = generator() % N_POP;
 
 	if(i == 0 || fitness[idx] < fitness[best]){
 	    best = idx;
@@ -92,8 +93,8 @@ inline int tournament(double fitness[], int n_pop, int size, default_random_engi
     
 }
 
-int tsp_genetic(double coord[][2], double all_north[], double all_weights[], int gifts[], 
-		int n_gifts, int n_pop=100, int gen=100, double mutate=40){
+double tsp_genetic(double coord[][2], double all_north[], double all_weights[], int gifts[], 
+		   int n_gifts, int route[]=NULL){
     
     int i, j;
     
@@ -118,37 +119,32 @@ int tsp_genetic(double coord[][2], double all_north[], double all_weights[], int
     }
 
     // Initialize population
-    static int pop[MAX_POP][MAX_GIFTS];
+    static int pop[N_POP][MAX_GIFTS];
 
-    for(i = 0; i < n_pop; i++){
+    for(i = 0; i < N_POP; i++){
 	for(j = 0; j < n_gifts; j++){
 	    pop[i][j] = j;
 	}
 	
 	shuffle(*(pop+i), *(pop+i)+n_gifts, generator);
     }
-
-    // Tournament size
-    int n_champions = (int)round(n_pop / 14.0);
     
     // Generations
-    static int new_pop[MAX_POP][MAX_GIFTS];
+    static int new_pop[N_POP][MAX_GIFTS];
     int best, used[MAX_GIFTS], *parent[2], s, e, idx;
-    double fitness[MAX_POP];
+    double fitness[N_POP], p_best;
+    
+    best = pop_fitness(pop, n_gifts, dist, north, weights, fitness);
 
-    for(int g = 0; g < gen; g++){
-	best = pop_fitness(pop, n_pop, n_gifts, dist, north, weights, fitness);
-	
-	//printf("%lf\n", fitness[best]);
-
+    while(true){
 	// Elitism
 	memcpy(new_pop[0], pop[best], sizeof(new_pop[0]));
 
 	// Evolve a new population
-	for(int k = 1; k < n_pop; k++){
+	for(int k = 1; k < N_POP; k++){
 	    // Crossover
 	    for(i = 0; i < 2; i++){
-		idx = tournament(fitness, n_pop, n_champions, generator);
+		idx = tournament(fitness, generator);
 		parent[i] = pop[idx];
 	    }
 
@@ -181,7 +177,7 @@ int tsp_genetic(double coord[][2], double all_north[], double all_weights[], int
 	    }
 	    
 	    // Mutate
-	    if((generator() % 100) <= mutate){
+	    if((generator() % 100) <= MUTATE){
 		i = generator() % n_gifts;
 		j = generator() % n_gifts;
 
@@ -190,16 +186,29 @@ int tsp_genetic(double coord[][2], double all_north[], double all_weights[], int
 	}
 	
 	memcpy(pop, new_pop, sizeof(pop));
+
+	// Convergance
+	p_best = fitness[best];
+	best = pop_fitness(pop, n_gifts, dist, north, weights, fitness);
+	
+	//printf("%lf\n", fitness[best]);
+	if((1 - fitness[best] / p_best) < TOLERANCE){
+	    break;
+	}
     }
 
-    best = pop_fitness(pop, n_pop, n_gifts, dist, north, weights, fitness);
+    if(route != NULL){
+	for(i = 0; i < n_gifts; i++){
+	    route[i] = gifts[pop[best][i]];
+	}
+    }
 
     return fitness[best];
 }
 
 int main(){
 
-    int i, j, k, e;
+    int i, j, k, m, e;
     double coord[N_GIFTS][2], weights[N_GIFTS], north[N_GIFTS];
 
     // Input
@@ -229,33 +238,38 @@ int main(){
     
     // Merge
     double cl_center[N_GIFTS][2], dist[N_GIFTS], cost;
-    int idx[N_GIFTS], merge[MAX_GIFTS], size_i, size_j, used[N_GIFTS], edge_count;
-    vector<double> merge_cost, gift_a, gift_b;
+    int idx[N_GIFTS*NEIGHBOURS], merge[MAX_GIFTS], size_i, size_j, used[N_GIFTS], edge_count, a, b;
+    vector<double> merge_cost;
+    vector<int> gift_a, gift_b;
         
-    for(e = 0; e < 1; e++){
+    for(e = 0; e < 10; e++){
 	// Print current total
 	cost = 0;
 	for(i = 0; i < n_clusters; i++){
 	    cost += cl_cost[i];
 	}
 
-	// printf("-----------------\nEpoch %d: %lf\n", e, cost);
+	printf("Epoch %2d: %12.0lf\n", e, cost);
 
 	// Cluster centers
 	for(i = 0; i < n_clusters; i++){
-	    cl_center[i][0] = NORTH_POLE[0];
-	    cl_center[i][1] = NORTH_POLE[1];
+	    cl_center[i][0] = 0;
+	    cl_center[i][1] = 0;
 
 	    for(j = 0; j < clusters[i].size(); j++){
 		cl_center[i][0] += coord[clusters[i][j]][0];
 		cl_center[i][1] += coord[clusters[i][j]][1];
 	    }
 
-	    cl_center[i][0] /= (clusters[i].size() + 1);
-	    cl_center[i][1] /= (clusters[i].size() + 1);
+	    cl_center[i][0] /= clusters[i].size();
+	    cl_center[i][1] /= clusters[i].size();
 	}
 
-	for(i = 0; i < 100; i++){
+	merge_cost.clear();
+	gift_a.clear();
+	gift_b.clear();
+
+	for(i = 0; i < n_clusters; i++){
 	    // Distance to neighbours
 	    for(j = 0; j < n_clusters; j++){
 		if(i != j){
@@ -268,7 +282,7 @@ int main(){
 	    }
 
 	    // Find the closest neighbours
-	    nth_element(idx, idx+EPOCH_NN[e], idx+n_clusters, [&dist](int a, int b) 
+	    nth_element(idx, idx+NEIGHBOURS, idx+n_clusters, [&dist](int a, int b) 
 			{return dist[a] < dist[b];});
 
 	    // Merge cost
@@ -277,31 +291,32 @@ int main(){
 		merge[k] = clusters[i][k];
 	    }
 
-	    for(j = 0; j < EPOCH_NN[e]; j++){
-		if(cl_weights[i] + cl_weights[idx[j]] > MAX_WEIGHT){
+	    for(m = 0; m < NEIGHBOURS; m++){
+		j = idx[m];
+
+		if(cl_weights[i] + cl_weights[j] > MAX_WEIGHT){
 		    continue;
 		}
 
-		size_j = clusters[idx[j]].size();
+		size_j = clusters[j].size();
 		for(k = 0; k < size_j; k++){
-		    merge[k + size_i] = clusters[idx[j]][k];
+		    merge[k + size_i] = clusters[j][k];
 		}
 
-		cost =  tsp_genetic(coord, north, weights, merge, size_i+size_j, 
-				    EPOCH_POP[e], EPOCH_GEN[e]);
+		cost = tsp_genetic(coord, north, weights, merge, size_i+size_j);
 		
-		cost -= cl_cost[i] + cl_cost[idx[j]];
+		cost -= cl_cost[i] + cl_cost[j];
 
 		if(cost < 0){
 		    merge_cost.push_back(cost);
 		    gift_a.push_back(i);
-		    gift_b.push_back(idx[j]);
+		    gift_b.push_back(j);
 		}
 	    }
 	}
 
 	// Merge
-	edge_count = merge_cost.size()
+	edge_count = merge_cost.size();
 	for(i = 0; i < edge_count; i++){
 	    idx[i] = i;
 	}
@@ -310,10 +325,68 @@ int main(){
 	     {return merge_cost[a] < merge_cost[b];});
 
 	memset(used, 0, sizeof(used));
-	
+
+	vector<int> new_clusters[N_GIFTS];
+	int new_n;
+	double new_weights[N_GIFTS], new_cost[N_GIFTS];
+
+	new_n = 0;
 	for(i = 0; i < edge_count; i++){
+	    a = gift_a[idx[i]];
+	    b = gift_b[idx[i]];
+
+	    if(used[a] || used[b]){
+		continue;
+	    }
 	    
+	    new_clusters[new_n] = clusters[a];
+	    new_clusters[new_n].insert(new_clusters[new_n].end(), clusters[b].begin(), 
+				       clusters[b].end());
+
+	    new_weights[new_n] = cl_weights[a] + cl_weights[b];
+	    new_cost[new_n] = cl_cost[a] + cl_cost[b] + merge_cost[idx[i]];
+	    new_n++;
+
+	    used[a] = used[b] = 1;
 	}
+
+	for(i = 0; i < n_clusters; i++){
+	    if(!used[i]){
+		new_clusters[new_n] = clusters[i];
+		new_weights[new_n] = cl_weights[i];
+		new_cost[new_n] = cl_cost[i];
+		new_n++;
+	    }
+	}
+
+	for(i = 0; i < new_n; i++){
+	    clusters[i] = new_clusters[i];
+	    cl_weights[i] = new_weights[i];
+	    cl_cost[i] = new_cost[i];
+	}
+
+	n_clusters = new_n;
     }
     
+    // Print result
+    /*FILE *fp_submission = fopen("submission.csv", "w");
+    fprintf(fp_submission, "GiftId,TripId\n");
+
+    int route[MAX_GIFTS], gifts[MAX_GIFTS];
+    
+    cost = 0;
+    for(i = 0; i < n_clusters; i++){
+        tsp_genetic(coord, north, weights, &clusters[i][0], clusters[i].size(), 
+			  100, 100, route);
+    
+	for(j = 0; j < clusters[i].size(); j++){
+	    fprintf(fp_submission, "%d,%d\n", route[j]+1, i);
+	}
+
+	cost += cl_cost[i];
+    }
+
+    printf("%lf\n", cost);*/
+    
  }
+
