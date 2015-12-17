@@ -7,10 +7,12 @@
 #include <cstring>
 using namespace std;
 
-const int MAX_WEIGHT = 1000;
+const int EPS = 1e-6;
+
+const int MAX_WEIGHT = 10000;
 const int SLEIGH_WEIGHT = 10;
 
-const int N_GIFTS = 10000;
+const int N_GIFTS = 1000;
 const int MAX_GIFTS = MAX_WEIGHT;
 
 const double NORTH_POLE[2] = {0.5 * M_PI, 0};
@@ -21,7 +23,14 @@ const int MUTATE = 40;
 const int TOURNAMENT = 7;
 const double TOLERANCE = 0.01;
 
-const int NEIGHBOURS = 5;
+const int NEIGHBOURS = 20;
+
+struct Cluster {
+    vector<int> gifts;
+    int target;
+    double weight, cost, merge_cost;
+    double center[2];
+};
 
 inline double haversine(const double c1[], const double c2[]){
 
@@ -93,11 +102,40 @@ inline int tournament(double fitness[], default_random_engine &generator){
     
 }
 
-double tsp_genetic(double coord[][2], double all_north[], double all_weights[], int gifts[], 
-		   int n_gifts, int route[]=NULL){
+inline double tsp_optimized2(double coord[][2], double north[], double weights[], 
+			     vector<int> &gifts){
+
+    int a, b;
+    double dist, cost_a, cost_b, cost_sleigh;
+
+    a = gifts[0];
+    b = gifts[1];
+
+    dist = haversine(coord[a], coord[b]);
+	
+    cost_sleigh = SLEIGH_WEIGHT*(north[a]+dist+north[b]);
+    cost_a = (weights[a]+weights[b])*north[a]+weights[b]*dist;
+    cost_b = (weights[b]+weights[a])*north[b]+weights[a]*dist;
+
+    if(cost_a < cost_b){
+	return cost_sleigh + cost_a;
+    } else {
+	swap(gifts[0], gifts[1]);
+	return cost_sleigh + cost_b;
+    }
+
+}
+
+double tsp_genetic(double coord[][2], double all_north[], double all_weights[], 
+		   vector<int> &gifts){
     
-    int i, j;
-    
+    int i, j, n_gifts = gifts.size();
+
+    // Special optimization case for 2 clusters
+    if(n_gifts == 2){
+	return tsp_optimized2(coord, all_north, all_weights, gifts);
+    }
+
     // Random number generator
     default_random_engine generator;
     generator.seed(time(NULL));
@@ -197,10 +235,13 @@ double tsp_genetic(double coord[][2], double all_north[], double all_weights[], 
 	}
     }
 
-    if(route != NULL){
-	for(i = 0; i < n_gifts; i++){
-	    route[i] = gifts[pop[best][i]];
-	}
+    // Reorder
+    for(i = 0; i < n_gifts; i++){
+	pop[best][i] = gifts[pop[best][i]];
+    }
+
+    for(i = 0; i < n_gifts; i++){
+	gifts[i] = pop[best][i];
     }
 
     return fitness[best];
@@ -226,54 +267,50 @@ int main(){
     }
 
     // Initialize clusters
-    vector<int> clusters[N_GIFTS];
+    Cluster clusters[N_GIFTS], new_clusters[N_GIFTS];
     int n_clusters = N_GIFTS;
-    double cl_weights[N_GIFTS], cl_cost[N_GIFTS];
     
     for(i = 0; i < N_GIFTS; i++){
-	clusters[i].push_back(i);
-	cl_weights[i] = weights[i];
-	cl_cost[i] = north[i] * (2 * SLEIGH_WEIGHT + weights[i]);
+	clusters[i].gifts.push_back(i);
+	clusters[i].weight = weights[i];
+	clusters[i].cost = north[i] * (2 * SLEIGH_WEIGHT + weights[i]);
     }
     
     // Merge
-    double cl_center[N_GIFTS][2], dist[N_GIFTS], cost;
-    int idx[N_GIFTS*NEIGHBOURS], merge[MAX_GIFTS], size_i, size_j, used[N_GIFTS], edge_count, a, b;
-    vector<double> merge_cost;
-    vector<int> gift_a, gift_b;
-        
-    for(e = 0; e < 10; e++){
+    double dist[N_GIFTS], cost;
+    int idx[N_GIFTS], used[N_GIFTS], a, b, edge_count;
+    vector<int> merge(MAX_GIFTS);
+
+    for(e = 0; e < 100; e++){
 	// Print current total
 	cost = 0;
 	for(i = 0; i < n_clusters; i++){
-	    cost += cl_cost[i];
+	    cost += clusters[i].cost;
 	}
 
 	printf("Epoch %2d: %12.0lf\n", e, cost);
 
 	// Cluster centers
 	for(i = 0; i < n_clusters; i++){
-	    cl_center[i][0] = 0;
-	    cl_center[i][1] = 0;
+	    clusters[i].center[0] = 0;
+	    clusters[i].center[1] = 0;
 
-	    for(j = 0; j < clusters[i].size(); j++){
-		cl_center[i][0] += coord[clusters[i][j]][0];
-		cl_center[i][1] += coord[clusters[i][j]][1];
+	    for(j = 0; j < clusters[i].gifts.size(); j++){
+		clusters[i].center[0] += coord[clusters[i].gifts[j]][0];
+		clusters[i].center[1] += coord[clusters[i].gifts[j]][1];
 	    }
 
-	    cl_center[i][0] /= clusters[i].size();
-	    cl_center[i][1] /= clusters[i].size();
+	    clusters[i].center[0] /= clusters[i].gifts.size();
+	    clusters[i].center[1] /= clusters[i].gifts.size();
 	}
 
-	merge_cost.clear();
-	gift_a.clear();
-	gift_b.clear();
+	edge_count = 0;
 
 	for(i = 0; i < n_clusters; i++){
 	    // Distance to neighbours
 	    for(j = 0; j < n_clusters; j++){
 		if(i != j){
-		    dist[j] = haversine(cl_center[i], cl_center[j]);
+		    dist[j] = haversine(clusters[i].center, clusters[j].center);
 		} else {
 		    dist[j] = 2 * M_PI * EARTH_RADIUS;
 		}
@@ -286,86 +323,80 @@ int main(){
 			{return dist[a] < dist[b];});
 
 	    // Merge cost
-	    size_i = clusters[i].size();
-	    for(k = 0; k < size_i; k++){
-		merge[k] = clusters[i][k];
-	    }
+	    clusters[i].merge_cost = 0;
 
 	    for(m = 0; m < NEIGHBOURS; m++){
 		j = idx[m];
 
-		if(cl_weights[i] + cl_weights[j] > MAX_WEIGHT){
+		if(clusters[i].weight + clusters[j].weight > MAX_WEIGHT){
 		    continue;
 		}
 
-		size_j = clusters[j].size();
-		for(k = 0; k < size_j; k++){
-		    merge[k + size_i] = clusters[j][k];
-		}
+		merge = clusters[i].gifts;
+		merge.insert(merge.begin(), clusters[j].gifts.begin(), 
+			     clusters[j].gifts.end());
 
-		cost = tsp_genetic(coord, north, weights, merge, size_i+size_j);
+		cost = tsp_genetic(coord, north, weights, merge) - 
+		    (clusters[i].cost + clusters[j].cost);
 		
-		cost -= cl_cost[i] + cl_cost[j];
-
-		if(cost < 0){
-		    merge_cost.push_back(cost);
-		    gift_a.push_back(i);
-		    gift_b.push_back(j);
+		if(cost < clusters[i].merge_cost){
+		    clusters[i].merge_cost = cost;
+		    clusters[i].target = j;
 		}
+	    }
+
+	    if(abs(clusters[i].merge_cost) > EPS){
+		edge_count++;
 	    }
 	}
 
 	// Merge
-	edge_count = merge_cost.size();
-	for(i = 0; i < edge_count; i++){
+	if(edge_count == 0){
+	    continue;
+	}
+
+	for(i = 0; i < n_clusters; i++){
 	    idx[i] = i;
 	}
 
-	sort(idx, idx+edge_count, [&merge_cost](int a, int b)
-	     {return merge_cost[a] < merge_cost[b];});
+	sort(idx, idx+n_clusters, [&clusters](int a, int b)
+	     {return clusters[a].merge_cost < clusters[b].merge_cost;});
 
 	memset(used, 0, sizeof(used));
 
-	vector<int> new_clusters[N_GIFTS];
-	int new_n;
-	double new_weights[N_GIFTS], new_cost[N_GIFTS];
-
-	new_n = 0;
-	for(i = 0; i < edge_count; i++){
-	    a = gift_a[idx[i]];
-	    b = gift_b[idx[i]];
+	m = 0;
+	for(i = 0; i < max(edge_count / 4, 1); i++){
+	    a = idx[i];
+	    b = clusters[a].target;
 
 	    if(used[a] || used[b]){
 		continue;
 	    }
 	    
-	    new_clusters[new_n] = clusters[a];
-	    new_clusters[new_n].insert(new_clusters[new_n].end(), clusters[b].begin(), 
-				       clusters[b].end());
+	    new_clusters[m].gifts = clusters[a].gifts;
+	    new_clusters[m].gifts.insert(new_clusters[m].gifts.end(), clusters[b].gifts.begin(), 
+					 clusters[b].gifts.end());
 
-	    new_weights[new_n] = cl_weights[a] + cl_weights[b];
-	    new_cost[new_n] = cl_cost[a] + cl_cost[b] + merge_cost[idx[i]];
-	    new_n++;
+	    new_clusters[m].weight = clusters[a].weight + clusters[b].weight;
+	    new_clusters[m].cost = clusters[a].cost + clusters[b].cost + clusters[a].merge_cost;
 
+	    m++;
 	    used[a] = used[b] = 1;
 	}
 
 	for(i = 0; i < n_clusters; i++){
 	    if(!used[i]){
-		new_clusters[new_n] = clusters[i];
-		new_weights[new_n] = cl_weights[i];
-		new_cost[new_n] = cl_cost[i];
-		new_n++;
+		new_clusters[m] = clusters[i];
+		m++;
 	    }
 	}
 
-	for(i = 0; i < new_n; i++){
+	for(i = 0; i < m; i++){
 	    clusters[i] = new_clusters[i];
-	    cl_weights[i] = new_weights[i];
-	    cl_cost[i] = new_cost[i];
 	}
 
-	n_clusters = new_n;
+	//printf("%d %d\n", m, edge_count);
+	n_clusters = m;
     }
     
     // Print result
