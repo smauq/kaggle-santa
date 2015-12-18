@@ -9,7 +9,7 @@ using namespace std;
 
 const int EPS = 1e-6;
 
-const int MAX_WEIGHT = 10000;
+const int MAX_WEIGHT = 1000;
 const int SLEIGH_WEIGHT = 10;
 
 const int N_GIFTS = 1000;
@@ -22,8 +22,9 @@ const int N_POP = 100;
 const int MUTATE = 40;
 const int TOURNAMENT = 7;
 const double TOLERANCE = 0.01;
+const int CONVERGE = 7;
 
-const int NEIGHBOURS = 20;
+const int NEIGHBOURS = 10;
 
 struct Cluster {
     vector<int> gifts;
@@ -169,11 +170,12 @@ double tsp_genetic(double coord[][2], double all_north[], double all_weights[],
     
     // Generations
     static int new_pop[N_POP][MAX_GIFTS];
-    int best, used[MAX_GIFTS], *parent[2], s, e, idx;
+    int best, used[MAX_GIFTS], *parent[2], s, e, idx, converge;
     double fitness[N_POP], p_best;
     
     best = pop_fitness(pop, n_gifts, dist, north, weights, fitness);
 
+    converge = 0;
     while(true){
 	// Elitism
 	memcpy(new_pop[0], pop[best], sizeof(new_pop[0]));
@@ -231,7 +233,12 @@ double tsp_genetic(double coord[][2], double all_north[], double all_weights[],
 	
 	//printf("%lf\n", fitness[best]);
 	if((1 - fitness[best] / p_best) < TOLERANCE){
-	    break;
+	    converge++;
+	    if(converge == CONVERGE){
+		break;
+	    }
+	} else {
+	    converge = 0;
 	}
     }
 
@@ -281,7 +288,7 @@ int main(){
     int idx[N_GIFTS], used[N_GIFTS], a, b, edge_count;
     vector<int> merge(MAX_GIFTS);
 
-    for(e = 0; e < 100; e++){
+    for(e = 0; e < 25; e++){
 	// Print current total
 	cost = 0;
 	for(i = 0; i < n_clusters; i++){
@@ -395,29 +402,10 @@ int main(){
 	    clusters[i] = new_clusters[i];
 	}
 
-	//printf("%d %d\n", m, edge_count);
 	n_clusters = m;
     }
-    
-    // Print result
-    /*FILE *fp_submission = fopen("submission.csv", "w");
-    fprintf(fp_submission, "GiftId,TripId\n");
 
-    int route[MAX_GIFTS], gifts[MAX_GIFTS];
-    
-    cost = 0;
-    for(i = 0; i < n_clusters; i++){
-        tsp_genetic(coord, north, weights, &clusters[i][0], clusters[i].size(), 
-			  100, 100, route);
-    
-	for(j = 0; j < clusters[i].size(); j++){
-	    fprintf(fp_submission, "%d,%d\n", route[j]+1, i);
-	}
-
-	cost += cl_cost[i];
-    }
-
-    printf("%lf\n", cost);*/
+    return 0;
     
  }
 
