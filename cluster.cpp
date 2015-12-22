@@ -7,7 +7,7 @@
 #include <cstring>
 using namespace std;
 
-const int EPS = 1e-6;
+const double EPS = 1e-6;
 
 const int MAX_WEIGHT = 1000;
 const int SLEIGH_WEIGHT = 10;
@@ -16,13 +16,12 @@ const int N_GIFTS = 100000;
 const int MAX_GIFTS = 67;
 
 const double NORTH_POLE[2] = {0.5 * M_PI, 0};
-const double EARTH_RADIUS = 6372.8;
+const double EARTH_RADIUS = 6371.0;
 
 const int N_POP = 100;
 const int MUTATE = 60;
 const int TOURNAMENT = 14;
 
-const double TOLERANCE = 1e-6;
 const int ATTEMPTS = 1;
 
 struct Cluster {
@@ -151,7 +150,7 @@ inline double tsp_optimized2(double coord[][2], double north[], double weights[]
 }
 
 double tsp_genetic(double coord[][2], double all_north[], double all_weights[], 
-		   vector<int> &gifts, int optimize=1000){
+		   vector<int> &gifts, int optimize=10){
     
     int i, j, n_gifts = gifts.size();
 
@@ -247,7 +246,7 @@ double tsp_genetic(double coord[][2], double all_north[], double all_weights[],
 	p_best = fitness[best];
 	best = pop_fitness(pop, n_gifts, dist, north, weights, fitness);
 	
-	if((1 - fitness[best] / p_best) < TOLERANCE){
+	if((1 - fitness[best] / p_best) < EPS){
 	    converge++;
 	} else {
 	    converge = 0;
@@ -317,7 +316,7 @@ int main(){
 	}
     }
 
-    progbar = 0;
+    progbar = 1;
     total_cost = 0;
     total_used = 0;
     while(true){
@@ -365,7 +364,7 @@ int main(){
 	    clusters.push_back(cluster);
 	}
 
-	if(total_used / (N_GIFTS/10.0) > progbar){
+	if(total_used / (N_GIFTS/10.0) >= progbar){
 	    fprintf(stderr, "|");
 	    progbar++;
 	}
@@ -383,13 +382,13 @@ int main(){
     double min_cost, cost;
     vector<int> route, min_route;
 
-    progbar = 0;
+    progbar = 1;
     total_cost = 0;
     for(i = 0; i < clusters.size(); i++){
 	for(j = 0; j < ATTEMPTS; j++){
 	    route = clusters[i].gifts;
 
-	    cost = tsp_genetic(coord, north, weights, route, 1);
+	    cost = tsp_genetic(coord, north, weights, route, 100);
 	    
 	    if(j == 0 || cost < min_cost){
 		min_cost = cost;
@@ -401,7 +400,7 @@ int main(){
 	clusters[i].gifts = min_route;
 	clusters[i].cost = min_cost;
 
-	if((i+1) / (clusters.size()/10.0) > progbar){
+	if((i+1) / (clusters.size()/10.0) >= progbar){
 	    fprintf(stderr, "|");
 	    progbar++;
 	}
@@ -410,9 +409,12 @@ int main(){
     fprintf(stderr, "\t%12.0lf\n", total_cost);
 
     // Split
-    double cost_a, cost_b;
-    vector<int> route_a, route_b, min_a, min_b;
+    fprintf(stderr, "SPL ");
 
+    double cost_a, cost_b, min_cost_a, min_cost_b;
+    vector<int> route_a, route_b, min_route_a, min_route_b;
+
+    progbar = 1;
     for(i = 0; i < clusters.size(); i++){
 	min_cost = clusters[i].cost;
 	for(j = 1; j < clusters[i].gifts.size(); j++){
@@ -426,23 +428,38 @@ int main(){
 		route_b.push_back(clusters[i].gifts[k]);
 	    }
 
-	    cost_a = tsp_genetic(coord, north, weights, route_a, 1);
-	    cost_b = tsp_genetic(coord, north, weights, route_b, 1);
+	    cost_a = tsp_genetic(coord, north, weights, route_a, 10);
+	    cost_b = tsp_genetic(coord, north, weights, route_b, 10);
 	    
 	    if(cost_a + cost_b < min_cost){
 		min_cost = cost_a + cost_b;
-		min_a = route_a;
-		min_b = route_b;
+		min_route_a = route_a;
+		min_route_b = route_b;
+		min_cost_a = cost_a;
+		min_cost_b = cost_b;
 	    }
 	}
 
 	if(abs(min_cost - clusters[i].cost) > EPS){
 	    total_cost += min_cost - clusters[i].cost;
 	    //printf("%4d %6.0lf\n", i, min_cost - clusters[i].cost);
+	    
+	    Cluster cluster;
+	    cluster.gifts = min_route_a;
+	    cluster.cost = min_cost_a;
+	    clusters.push_back(cluster);
+
+	    clusters[i].gifts = min_route_b;
+	    clusters[i].cost = min_cost_b;
+	}
+
+	if((i+1) / (clusters.size()/10.0) >= progbar){
+	    fprintf(stderr, "|");
+	    progbar++;
 	}
     }
 
-    fprintf(stderr, "%12.0lf\n", total_cost);
+    fprintf(stderr, "\t%12.0lf\n", total_cost);
 
     // Output result
     FILE *fp_route = fopen("submission.csv", "w");
