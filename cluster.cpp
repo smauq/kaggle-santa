@@ -23,7 +23,6 @@ const int MUTATE = 60;
 const int TOURNAMENT = 14;
 
 const double TOLERANCE = 1e-6;
-const int CONVERGE = 1;
 const int ATTEMPTS = 1;
 
 struct Cluster {
@@ -46,7 +45,31 @@ inline double haversine(const double c1[], const double c2[]){
 
 }
 
-inline double get_weariness(int route[], int n_gifts, double dist[][MAX_GIFTS],
+inline double get_weariness(vector<int> &gifts, double coord[][2],
+			    double north[], double weights[]){
+    
+    int i, n_gifts = gifts.size();
+    double weariness, weight;
+
+    weight = SLEIGH_WEIGHT;
+    for(i = 0; i < n_gifts; i++){
+	weight += weights[gifts[i]];
+    }
+
+    weariness = weight * north[gifts[0]];
+    weight -= weights[gifts[0]];
+
+    for(i = 1; i < n_gifts; i++){
+	weariness += haversine(coord[gifts[i]], coord[gifts[i-1]]) * weight;
+	weight -= weights[gifts[i]];
+    }
+
+    weariness += north[gifts[n_gifts - 1]] * SLEIGH_WEIGHT;
+
+    return weariness;
+}
+
+inline double get_weariness(int gifts[], int n_gifts, double dist[][MAX_GIFTS],
 			    double north[], double weights[]){
     
     int i;
@@ -57,15 +80,15 @@ inline double get_weariness(int route[], int n_gifts, double dist[][MAX_GIFTS],
 	weight += weights[i];
     }
 
-    weariness = weight * north[route[0]];
-    weight -= weights[route[0]];
+    weariness = weight * north[gifts[0]];
+    weight -= weights[gifts[0]];
 
     for(i = 1; i < n_gifts; i++){
-	weariness += dist[route[i]][route[i-1]] * weight;
-	weight -= weights[route[i]];
+	weariness += dist[gifts[i]][gifts[i-1]] * weight;
+	weight -= weights[gifts[i]];
     }
 
-    weariness += north[route[n_gifts-1]] * SLEIGH_WEIGHT;
+    weariness += north[gifts[n_gifts-1]] * SLEIGH_WEIGHT;
 
     return weariness;
 }
@@ -128,7 +151,7 @@ inline double tsp_optimized2(double coord[][2], double north[], double weights[]
 }
 
 double tsp_genetic(double coord[][2], double all_north[], double all_weights[], 
-		   vector<int> &gifts){
+		   vector<int> &gifts, int optimize=1000){
     
     int i, j, n_gifts = gifts.size();
 
@@ -160,8 +183,6 @@ double tsp_genetic(double coord[][2], double all_north[], double all_weights[],
 	for(j = 0; j < n_gifts; j++){
 	    pop[i][j] = j;
 	}
-	
-	//shuffle(*(pop+i), *(pop+i)+n_gifts, generator);
     }
     
     // Generations
@@ -171,8 +192,7 @@ double tsp_genetic(double coord[][2], double all_north[], double all_weights[],
     
     best = pop_fitness(pop, n_gifts, dist, north, weights, fitness);
     
-    converge = 0;
-    while(true){
+    for(converge = 0; converge < optimize; ){
 	// Elitism
 	memcpy(new_pop[0], pop[best], sizeof(new_pop[0]));
 
@@ -227,12 +247,8 @@ double tsp_genetic(double coord[][2], double all_north[], double all_weights[],
 	p_best = fitness[best];
 	best = pop_fitness(pop, n_gifts, dist, north, weights, fitness);
 	
-	//printf("%lf\n", fitness[best]);
 	if((1 - fitness[best] / p_best) < TOLERANCE){
 	    converge++;
-	    if(converge == CONVERGE){
-		break;
-	    }
 	} else {
 	    converge = 0;
 	}
@@ -252,7 +268,7 @@ double tsp_genetic(double coord[][2], double all_north[], double all_weights[],
 
 int main(){
 
-    int i, j;
+    int i, j, k, progbar;
     double coord[N_GIFTS][2], weights[N_GIFTS], north[N_GIFTS];
 
     generator.seed(time(NULL));
@@ -278,11 +294,13 @@ int main(){
 	used[i] = 0;
     }
 
-    printf("%12.0lf\n", total_cost);
+    printf("STR\t\t%12.0lf\n", total_cost);
 
     // Cluster
+    fprintf(stderr, "CLT ");
+
     vector<Cluster> clusters;
-    int idx[N_GIFTS], count, region[N_GIFTS];
+    int idx[N_GIFTS], count, region[N_GIFTS], total_used;
 
     for(i = 0; i < N_GIFTS; i++){
 	idx[i] = i;
@@ -299,6 +317,9 @@ int main(){
 	}
     }
 
+    progbar = 0;
+    total_cost = 0;
+    total_used = 0;
     while(true){
 	sort(idx, idx+N_GIFTS, [&used, &coord, &region](int a, int b){
 		if(used[a]){
@@ -334,11 +355,19 @@ int main(){
 		cluster.gifts.push_back(idx[i]);
 		cluster.weight += weights[idx[i]];
 		used[idx[i]] = 1;
+		total_used++;
 	    }
 	}
 
 	if(cluster.gifts.size() > 0){
+	    cluster.cost = get_weariness(cluster.gifts, coord, north, weights);
+	    total_cost += cluster.cost;
 	    clusters.push_back(cluster);
+	}
+
+	if(total_used / (N_GIFTS/10.0) > progbar){
+	    fprintf(stderr, "|");
+	    progbar++;
 	}
 
 	if(count != MAX_GIFTS){
@@ -346,16 +375,21 @@ int main(){
 	}
     }
 
+    fprintf(stderr, "\t%12.0lf\n", total_cost);
+
     // Optimize using TSP
+    fprintf(stderr, "TSP ");
+
     double min_cost, cost;
     vector<int> route, min_route;
 
+    progbar = 0;
     total_cost = 0;
     for(i = 0; i < clusters.size(); i++){
 	for(j = 0; j < ATTEMPTS; j++){
 	    route = clusters[i].gifts;
 
-	    cost = tsp_genetic(coord, north, weights, route);
+	    cost = tsp_genetic(coord, north, weights, route, 1);
 	    
 	    if(j == 0 || cost < min_cost){
 		min_cost = cost;
@@ -365,9 +399,50 @@ int main(){
 
 	total_cost += min_cost;
 	clusters[i].gifts = min_route;
+	clusters[i].cost = min_cost;
+
+	if((i+1) / (clusters.size()/10.0) > progbar){
+	    fprintf(stderr, "|");
+	    progbar++;
+	}
     }
 
-    printf("%12.0lf\n", total_cost);
+    fprintf(stderr, "\t%12.0lf\n", total_cost);
+
+    // Split
+    double cost_a, cost_b;
+    vector<int> route_a, route_b, min_a, min_b;
+
+    for(i = 0; i < clusters.size(); i++){
+	min_cost = clusters[i].cost;
+	for(j = 1; j < clusters[i].gifts.size(); j++){
+	    route_a.clear();
+	    for(k = 0; k < j; k++){
+		route_a.push_back(clusters[i].gifts[k]);
+	    }
+
+	    route_b.clear();
+	    for(k = j; k < clusters[i].gifts.size(); k++){
+		route_b.push_back(clusters[i].gifts[k]);
+	    }
+
+	    cost_a = tsp_genetic(coord, north, weights, route_a, 1);
+	    cost_b = tsp_genetic(coord, north, weights, route_b, 1);
+	    
+	    if(cost_a + cost_b < min_cost){
+		min_cost = cost_a + cost_b;
+		min_a = route_a;
+		min_b = route_b;
+	    }
+	}
+
+	if(abs(min_cost - clusters[i].cost) > EPS){
+	    total_cost += min_cost - clusters[i].cost;
+	    //printf("%4d %6.0lf\n", i, min_cost - clusters[i].cost);
+	}
+    }
+
+    fprintf(stderr, "%12.0lf\n", total_cost);
 
     // Output result
     FILE *fp_route = fopen("submission.csv", "w");
