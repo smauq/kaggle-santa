@@ -26,7 +26,7 @@ const int ATTEMPTS = 1;
 
 struct Cluster {
     vector<int> gifts;
-    double weight, cost;
+    double weight, cost, center[2];
 };
 
 default_random_engine generator;
@@ -448,13 +448,25 @@ int main(){
 	if(abs(min_cost - clusters[i].cost) > EPS){
 	    total_cost += min_cost - clusters[i].cost;
 	    
-	    Cluster cluster;
-	    cluster.gifts = min_route_a;
-	    cluster.cost = min_cost_a;
-	    clusters.push_back(cluster);
+	    Cluster cluster_a;
+	    cluster_a.gifts = min_route_a;
+	    cluster_a.cost = min_cost_a;
 
-	    clusters[i].gifts = min_route_b;
-	    clusters[i].cost = min_cost_b;
+	    cluster_a.weight = 0;
+	    for(j = 0; j < cluster_a.gifts.size(); j++){
+		cluster_a.weight += weights[cluster_a.gifts[j]];
+	    }
+
+	    clusters.push_back(cluster_a);
+
+	    Cluster cluster_b;
+	    cluster_b.gifts = min_route_b;
+	    cluster_b.cost = min_cost_b;
+	    cluster_b.weight = clusters[i].weight - cluster_a.weight;
+	    clusters.push_back(cluster_b);
+
+	    clusters.erase(clusters.begin() + i);
+	    i--;
 	}
 
 	if((i+1) / (clusters.size()/10.0) >= progbar){
