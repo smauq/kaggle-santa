@@ -68,10 +68,10 @@ inline double get_weariness(vector<int> &gifts, double coord[][2],
     return weariness;
 }
 
-inline double get_weariness(int gifts[], int n_gifts, double dist[][MAX_GIFTS],
+inline double get_weariness(vector<int> &gifts, double dist[][MAX_GIFTS],
 			    double north[], double weights[]){
     
-    int i;
+    int i, n_gifts = gifts.size();
     double weariness, weight;
 
     weight = SLEIGH_WEIGHT;
@@ -92,13 +92,13 @@ inline double get_weariness(int gifts[], int n_gifts, double dist[][MAX_GIFTS],
     return weariness;
 }
 
-inline int pop_fitness(int pop[][MAX_GIFTS], int n_gifts, double dist[][MAX_GIFTS], 
-		       double north[], double weights[], double fitness[]){
+inline int pop_fitness(vector<int> pop[], double dist[][MAX_GIFTS], double north[], 
+		       double weights[], double fitness[]){
 
     int best = 0;
 
     for(int i = 0; i < N_POP; i++){
-	fitness[i] = get_weariness(pop[i], n_gifts, dist, north, weights);
+	fitness[i] = get_weariness(pop[i], dist, north, weights);
 
 	if(fitness[i] < fitness[best]){
 	    best = i;
@@ -109,7 +109,7 @@ inline int pop_fitness(int pop[][MAX_GIFTS], int n_gifts, double dist[][MAX_GIFT
 
 }
 
-inline int tournament(double fitness[], default_random_engine &generator){
+inline int tournament(double fitness[]){
 
     int best, idx;
 
@@ -125,8 +125,8 @@ inline int tournament(double fitness[], default_random_engine &generator){
     
 }
 
-inline double tsp_optimized2(double coord[][2], double north[], double weights[], 
-			     vector<int> &gifts){
+inline double tsp_optimized2(vector<int> &gifts, double coord[][2], double north[], 
+			     double weights[]){
 
     int a, b;
     double dist, cost_a, cost_b, cost_sleigh;
@@ -149,14 +149,14 @@ inline double tsp_optimized2(double coord[][2], double north[], double weights[]
 
 }
 
-double tsp_genetic(double coord[][2], double all_north[], double all_weights[], 
-		   vector<int> &gifts, int optimize=10){
+double tsp_genetic(vector<int> &gifts, double coord[][2], double all_north[], 
+		   double all_weights[], int optimize=10){
     
     int i, j, n_gifts = gifts.size();
 
-    // Special optimization case for 2 clusters
+    // Special optimization case for 2 gifts
     if(n_gifts == 2){
-	return tsp_optimized2(coord, all_north, all_weights, gifts);
+	return tsp_optimized2(gifts, coord, all_north, all_weights);
     }
 
     // Precompute and select relevant data
@@ -176,30 +176,33 @@ double tsp_genetic(double coord[][2], double all_north[], double all_weights[],
     }
 
     // Initialize population
-    static int pop[N_POP][MAX_GIFTS];
+    static vector<int> pop[N_POP], new_pop[N_POP];
 
     for(i = 0; i < N_POP; i++){
+	pop[i].resize(n_gifts);
 	for(j = 0; j < n_gifts; j++){
 	    pop[i][j] = j;
 	}
+
+	new_pop[i].resize(n_gifts);
     }
     
     // Generations
-    static int new_pop[N_POP][MAX_GIFTS];
-    int best, used[MAX_GIFTS], *parent[2], s, e, idx, converge;
+    vector<int> parent[2];
+    int best, used[MAX_GIFTS], s, e, idx, converge;
     double fitness[N_POP], p_best;
     
-    best = pop_fitness(pop, n_gifts, dist, north, weights, fitness);
+    best = pop_fitness(pop, dist, north, weights, fitness);
     
     for(converge = 0; converge < optimize; ){
 	// Elitism
-	memcpy(new_pop[0], pop[best], sizeof(new_pop[0]));
+	new_pop[0] = pop[best];
 
 	// Evolve a new population
 	for(int k = 1; k < N_POP; k++){
 	    // Crossover
 	    for(i = 0; i < 2; i++){
-		idx = tournament(fitness, generator);
+		idx = tournament(fitness);
 		parent[i] = pop[idx];
 	    }
 
@@ -240,11 +243,13 @@ double tsp_genetic(double coord[][2], double all_north[], double all_weights[],
 	    }
 	}
 	
-	memcpy(pop, new_pop, sizeof(pop));
+	for(i = 0; i < N_POP; i++){
+	    pop[i] = new_pop[i];
+	}
 
 	// Convergance
 	p_best = fitness[best];
-	best = pop_fitness(pop, n_gifts, dist, north, weights, fitness);
+	best = pop_fitness(pop, dist, north, weights, fitness);
 	
 	if((1 - fitness[best] / p_best) < EPS){
 	    converge++;
@@ -388,7 +393,7 @@ int main(){
 	for(j = 0; j < ATTEMPTS; j++){
 	    route = clusters[i].gifts;
 
-	    cost = tsp_genetic(coord, north, weights, route, 100);
+	    cost = tsp_genetic(route, coord, north, weights, 100);
 	    
 	    if(j == 0 || cost < min_cost){
 		min_cost = cost;
@@ -428,8 +433,8 @@ int main(){
 		route_b.push_back(clusters[i].gifts[k]);
 	    }
 
-	    cost_a = tsp_genetic(coord, north, weights, route_a, 10);
-	    cost_b = tsp_genetic(coord, north, weights, route_b, 10);
+	    cost_a = tsp_genetic(route_a, coord, north, weights, 10);
+	    cost_b = tsp_genetic(route_b, coord, north, weights, 10);
 	    
 	    if(cost_a + cost_b < min_cost){
 		min_cost = cost_a + cost_b;
@@ -442,7 +447,6 @@ int main(){
 
 	if(abs(min_cost - clusters[i].cost) > EPS){
 	    total_cost += min_cost - clusters[i].cost;
-	    //printf("%4d %6.0lf\n", i, min_cost - clusters[i].cost);
 	    
 	    Cluster cluster;
 	    cluster.gifts = min_route_a;
