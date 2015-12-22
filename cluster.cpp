@@ -13,7 +13,7 @@ const int MAX_WEIGHT = 1000;
 const int SLEIGH_WEIGHT = 10;
 
 const int N_GIFTS = 100000;
-const int MAX_GIFTS = 67;
+const int MAX_GIFTS = 100;
 
 const double NORTH_POLE[2] = {0.5 * M_PI, 0};
 const double EARTH_RADIUS = 6371.0;
@@ -23,6 +23,7 @@ const int MUTATE = 60;
 const int TOURNAMENT = 14;
 
 const int ATTEMPTS = 1;
+const int NEIGHBOURS = 3;
 
 struct Cluster {
     vector<int> gifts;
@@ -270,9 +271,21 @@ double tsp_genetic(vector<int> &gifts, double coord[][2], double all_north[],
     return fitness[best];
 }
 
+inline double get_weight(vector<int> &gifts, double weights[]){
+
+    double weight = 0;
+
+    for(int i = 0; i < gifts.size(); i++){
+	weight += weights[gifts[i]];
+    }
+
+    return weight;
+
+}
+
 int main(){
 
-    int i, j, k, progbar;
+    int i, j, k, m, p, h, progbar;
     double coord[N_GIFTS][2], weights[N_GIFTS], north[N_GIFTS];
 
     generator.seed(time(NULL));
@@ -341,7 +354,7 @@ int main(){
 		}
 	    });
 
-	for(count = 0; count < MAX_GIFTS; count++){
+	for(count = 0; count < 67; count++){
 	    if(used[idx[count]]){
 		break;
 	    }
@@ -374,7 +387,7 @@ int main(){
 	    progbar++;
 	}
 
-	if(count != MAX_GIFTS){
+	if(count != 67){
 	    break;
 	}
     }
@@ -416,7 +429,7 @@ int main(){
     // Split
     fprintf(stderr, "SPL ");
 
-    double cost_a, cost_b, min_cost_a, min_cost_b;
+    double cost_a, cost_b;
     vector<int> route_a, route_b, min_route_a, min_route_b;
 
     progbar = 1;
@@ -440,29 +453,23 @@ int main(){
 		min_cost = cost_a + cost_b;
 		min_route_a = route_a;
 		min_route_b = route_b;
-		min_cost_a = cost_a;
-		min_cost_b = cost_b;
 	    }
 	}
 
-	if(abs(min_cost - clusters[i].cost) > EPS){
+	if(min_cost < clusters[i].cost){
 	    total_cost += min_cost - clusters[i].cost;
 	    
 	    Cluster cluster_a;
 	    cluster_a.gifts = min_route_a;
-	    cluster_a.cost = min_cost_a;
-
-	    cluster_a.weight = 0;
-	    for(j = 0; j < cluster_a.gifts.size(); j++){
-		cluster_a.weight += weights[cluster_a.gifts[j]];
-	    }
+	    cluster_a.cost = get_weariness(cluster_a.gifts, coord, north, weights);
+	    cluster_a.weight = get_weight(cluster_a.gifts, weights);
 
 	    clusters.push_back(cluster_a);
 
 	    Cluster cluster_b;
 	    cluster_b.gifts = min_route_b;
-	    cluster_b.cost = min_cost_b;
-	    cluster_b.weight = clusters[i].weight - cluster_a.weight;
+	    cluster_b.cost = get_weariness(cluster_b.gifts, coord, north, weights);
+	    cluster_b.weight = get_weight(cluster_b.gifts, weights);
 	    clusters.push_back(cluster_b);
 
 	    clusters.erase(clusters.begin() + i);
@@ -476,6 +483,140 @@ int main(){
     }
 
     fprintf(stderr, "\t%12.0lf\n", total_cost);
+    
+    // Swap
+    for(i = 0; i < clusters.size(); i++){
+	clusters[i].center[0] = 0;
+	clusters[i].center[1] = 0;
+
+	for(j = 0; j < clusters[i].gifts.size(); j++){
+	    clusters[i].center[0] += coord[clusters[i].gifts[j]][0];
+	    clusters[i].center[1] += coord[clusters[i].gifts[j]][1];
+	}
+
+	clusters[i].center[0] /= clusters[i].gifts.size();
+	clusters[i].center[1] /= clusters[i].gifts.size();
+    }
+
+    int min_p, min_k;
+    double dist[N_GIFTS];
+
+    for(h = 0; h < 10; h++){
+	fprintf(stderr, "S%02d ", h);
+
+	vector<int> target_a, target_b, pos_a, pos_b;
+	vector<double> swap_cost;
+	
+	progbar = 1;
+	for(i = 0; i < clusters.size(); i++){
+	    if(clusters[i].gifts.size() <= 1){
+		printf("Warning!");
+		continue;
+	    }
+
+	    // Distance to neighbours
+	    for(j = 0; j < clusters.size(); j++){
+		if(i != j){
+		    dist[j] = haversine(clusters[i].center, clusters[j].center);
+		} else {
+		    dist[j] = 2 * M_PI * EARTH_RADIUS;
+		}
+		
+		idx[j] = j;
+	    }
+	    
+	    // Find the closest neighbours
+	    nth_element(idx, idx+NEIGHBOURS, idx+clusters.size(), [&dist](int a, int b) 
+			{return dist[a] < dist[b];});
+
+	    for(m = 0; m < NEIGHBOURS; m++){
+		j = idx[m];
+		
+		min_cost = clusters[i].cost + clusters[j].cost;
+
+		for(k = 0; k < clusters[i].gifts.size(); k++){
+		    if(clusters[j].weight + weights[clusters[i].gifts[k]] > MAX_WEIGHT){
+			continue;
+		    }
+
+		    route_a = clusters[i].gifts;
+		    route_a.erase(route_a.begin() + k);
+		    
+		    cost_a = get_weariness(route_a, coord, north, weights);
+		    
+		    for(p = 0; p < clusters[j].gifts.size(); p++){
+			route_b = clusters[j].gifts;
+			route_b.insert(route_b.begin() + p, clusters[i].gifts[k]);
+			
+			cost_b = get_weariness(route_b, coord, north, weights);
+			
+			if(cost_a + cost_b < min_cost){
+			    min_cost = cost_a + cost_b;
+			    min_k = k;
+			    min_p = p;
+			}
+		    }
+		}
+	    
+		if(min_cost < clusters[i].cost + clusters[j].cost){
+		    swap_cost.push_back(min_cost - (clusters[i].cost + clusters[j].cost));
+		    target_a.push_back(i);
+		    target_b.push_back(j);
+		    pos_a.push_back(min_k);
+		    pos_b.push_back(min_p);
+		}
+	    }
+
+	    if((i+1) / (clusters.size()/10.0) >= progbar){
+		fprintf(stderr, "|");
+		progbar++;
+	    }
+	}
+	
+	for(i = 0; i < swap_cost.size(); i++){
+	    idx[i] = i;
+	}
+	
+	sort(idx, idx+swap_cost.size(), [&swap_cost](int a, int b){
+		return swap_cost[a] < swap_cost[b];
+	    });
+
+	for(i = 0; i < clusters.size(); i++){
+	    used[i] = 0;
+	}
+	
+	for(m = 0; m < max((int)swap_cost.size()>>2, 1); m++){
+	    i = target_a[idx[m]];
+	    j = target_b[idx[m]];
+	    
+	    if(used[i] || used[j]){
+		continue;
+	    }
+	    
+	    //printf("%lu %lu %d %d\n", clusters[i].gifts.size(), clusters[j].gifts.size(), 
+	    //	   pos_a[idx[m]], pos_b[idx[m]]);
+	    
+	    clusters[j].gifts.insert(clusters[j].gifts.begin() + pos_b[idx[m]],
+				     clusters[i].gifts[pos_a[idx[m]]]);
+
+	    clusters[i].gifts.erase(clusters[i].gifts.begin() + pos_a[idx[m]]);
+	    
+	    clusters[i].weight = get_weight(clusters[i].gifts, weights);
+	    clusters[j].weight = get_weight(clusters[j].gifts, weights);
+	    
+	    clusters[i].cost = tsp_genetic(clusters[i].gifts, coord, north, weights, 100);
+	    clusters[j].cost = tsp_genetic(clusters[j].gifts, coord, north, weights, 100);
+	    
+	    used[i] = used[j] = 1;
+	}
+
+	total_cost = 0;
+	for(i = 0; i < clusters.size(); i++){
+	    total_cost += clusters[i].cost;
+	}
+	
+	fprintf(stderr, "\t%12.0lf\n", total_cost);
+    }
 
     // Output result
     FILE *fp_route = fopen("submission.csv", "w");
