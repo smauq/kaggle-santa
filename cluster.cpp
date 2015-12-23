@@ -13,7 +13,7 @@ const int MAX_WEIGHT = 1000;
 const int SLEIGH_WEIGHT = 10;
 
 const int N_GIFTS = 100000;
-const int MAX_GIFTS = 100;
+const int MAX_GIFTS = 200;
 
 const double NORTH_POLE[2] = {0.5 * M_PI, 0};
 const double EARTH_RADIUS = 6371.0;
@@ -22,8 +22,20 @@ const int N_POP = 100;
 const int MUTATE = 60;
 const int TOURNAMENT = 14;
 
-const int ATTEMPTS = 1;
-const int NEIGHBOURS = 3;
+const int MAGIC_GIFTS = 67;
+const double MAGIC_LAT = -52.0 / 180.0 * M_PI;
+const double MAGIC_LON = -105.0 / 180.0 * M_PI;
+
+const int TSP_CONVERGE = 1000;
+const int TSP_ATTEMPTS = 10;
+
+const int SPLIT_CONVERGE = 10;
+const int SPLIT_ATTEMPTS = 5;
+
+const int SWAP_EPOCHS = 100;
+const int NEIGHBOURS = 16;
+const int SWAP_CONVERGE = 100;
+const int SWAP_ATTEMPTS = 3;
 
 struct Cluster {
     vector<int> gifts;
@@ -151,12 +163,16 @@ inline double tsp_optimized2(vector<int> &gifts, double coord[][2], double north
 }
 
 double tsp_genetic(vector<int> &gifts, double coord[][2], double all_north[], 
-		   double all_weights[], int optimize=10){
+		   double all_weights[], int converge){
     
     int i, j, n_gifts = gifts.size();
 
-    // Special optimization case for 2 gifts
-    if(n_gifts == 2){
+    // Special optimization cases
+    if(n_gifts == 0){
+	return 0;
+    } else if(n_gifts == 1){
+	return all_north[gifts[0]] * (2 * SLEIGH_WEIGHT + all_weights[gifts[0]]);
+    } else if(n_gifts == 2){
 	return tsp_optimized2(gifts, coord, all_north, all_weights);
     }
 
@@ -190,12 +206,13 @@ double tsp_genetic(vector<int> &gifts, double coord[][2], double all_north[],
     
     // Generations
     vector<int> parent[2];
-    int best, used[MAX_GIFTS], s, e, idx, converge;
+    int best, used[MAX_GIFTS], s, e, idx, c;
     double fitness[N_POP], p_best;
     
     best = pop_fitness(pop, dist, north, weights, fitness);
     
-    for(converge = 0; converge < optimize; ){
+    c = 0;
+    while(c < converge){
 	// Elitism
 	new_pop[0] = pop[best];
 
@@ -253,9 +270,9 @@ double tsp_genetic(vector<int> &gifts, double coord[][2], double all_north[],
 	best = pop_fitness(pop, dist, north, weights, fitness);
 	
 	if((1 - fitness[best] / p_best) < EPS){
-	    converge++;
+	    c++;
 	} else {
-	    converge = 0;
+	    c = 0;
 	}
     }
 
@@ -264,11 +281,32 @@ double tsp_genetic(vector<int> &gifts, double coord[][2], double all_north[],
 	pop[best][i] = gifts[pop[best][i]];
     }
 
-    for(i = 0; i < n_gifts; i++){
-	gifts[i] = pop[best][i];
-    }
+    gifts = pop[best];
 
     return fitness[best];
+}
+
+double tsp_genetic(vector<int> &gifts, double coord[][2], double north[], 
+		   double weights[], int converge, int attempts){
+
+    double cost, min_cost;
+    vector<int> route, min_route;
+
+    for(int i = 0; i < attempts; i++){
+	route = gifts;
+	
+	cost = tsp_genetic(route, coord, north, weights, converge);
+	    
+	if(i == 0 || cost < min_cost){
+	    min_cost = cost;
+	    min_route = route;
+	}
+    }
+
+    gifts = min_route;
+
+    return min_cost;
+
 }
 
 inline double get_weight(vector<int> &gifts, double weights[]){
@@ -285,7 +323,7 @@ inline double get_weight(vector<int> &gifts, double weights[]){
 
 int main(){
 
-    int i, j, k, m, p, h, progbar;
+    int i, j, k, m, p, progbar;
     double coord[N_GIFTS][2], weights[N_GIFTS], north[N_GIFTS];
 
     generator.seed(time(NULL));
@@ -323,11 +361,11 @@ int main(){
 	idx[i] = i;
 	
 	region[i] = 0;
-	if(coord[i][0] < -52.0/180.0*M_PI){
+	if(coord[i][0] < MAGIC_LAT){
 	    region[i] += 2;
 	}
 
-	if(coord[i][1] < -105.0/180.0*M_PI){
+	if(coord[i][1] < MAGIC_LON){
 	    region[i] += 2;
 	} else {
 	    region[i] += 1;
@@ -354,7 +392,7 @@ int main(){
 		}
 	    });
 
-	for(count = 0; count < 67; count++){
+	for(count = 0; count < MAGIC_GIFTS; count++){
 	    if(used[idx[count]]){
 		break;
 	    }
@@ -387,7 +425,7 @@ int main(){
 	    progbar++;
 	}
 
-	if(count != 67){
+	if(count != MAGIC_GIFTS){
 	    break;
 	}
     }
@@ -397,26 +435,13 @@ int main(){
     // Optimize using TSP
     fprintf(stderr, "TSP ");
 
-    double min_cost, cost;
-    vector<int> route, min_route;
-
     progbar = 1;
     total_cost = 0;
     for(i = 0; i < clusters.size(); i++){
-	for(j = 0; j < ATTEMPTS; j++){
-	    route = clusters[i].gifts;
+	clusters[i].cost = tsp_genetic(clusters[i].gifts, coord, north, weights,
+				       TSP_CONVERGE, TSP_ATTEMPTS);
 
-	    cost = tsp_genetic(route, coord, north, weights, 100);
-	    
-	    if(j == 0 || cost < min_cost){
-		min_cost = cost;
-		min_route = route;
-	    }
-	}
-
-	total_cost += min_cost;
-	clusters[i].gifts = min_route;
-	clusters[i].cost = min_cost;
+	total_cost += clusters[i].cost;
 
 	if((i+1) / (clusters.size()/10.0) >= progbar){
 	    fprintf(stderr, "|");
@@ -429,7 +454,7 @@ int main(){
     // Split
     fprintf(stderr, "SPL ");
 
-    double cost_a, cost_b;
+    double cost_a, cost_b, min_cost;
     vector<int> route_a, route_b, min_route_a, min_route_b;
 
     progbar = 1;
@@ -446,8 +471,11 @@ int main(){
 		route_b.push_back(clusters[i].gifts[k]);
 	    }
 
-	    cost_a = tsp_genetic(route_a, coord, north, weights, 10);
-	    cost_b = tsp_genetic(route_b, coord, north, weights, 10);
+	    cost_a = tsp_genetic(route_a, coord, north, weights, 
+				 SPLIT_CONVERGE, SPLIT_ATTEMPTS);
+
+	    cost_b = tsp_genetic(route_b, coord, north, weights,
+				 SPLIT_CONVERGE, SPLIT_ATTEMPTS);
 	    
 	    if(cost_a + cost_b < min_cost){
 		min_cost = cost_a + cost_b;
@@ -498,22 +526,17 @@ int main(){
 	clusters[i].center[1] /= clusters[i].gifts.size();
     }
 
-    int min_p, min_k;
+    int min_p, min_k, epoch;
     double dist[N_GIFTS];
 
-    for(h = 0; h < 10; h++){
-	fprintf(stderr, "S%02d ", h);
+    for(epoch = 0; epoch < SWAP_EPOCHS; epoch++){
+	fprintf(stderr, "S%02d ", epoch);
 
 	vector<int> target_a, target_b, pos_a, pos_b;
 	vector<double> swap_cost;
 	
 	progbar = 1;
 	for(i = 0; i < clusters.size(); i++){
-	    if(clusters[i].gifts.size() <= 1){
-		printf("Warning!");
-		continue;
-	    }
-
 	    // Distance to neighbours
 	    for(j = 0; j < clusters.size(); j++){
 		if(i != j){
@@ -585,16 +608,22 @@ int main(){
 	    used[i] = 0;
 	}
 	
-	for(m = 0; m < max((int)swap_cost.size()>>2, 1); m++){
+	double aux = 0, maux = 0;
+
+	k = swap_cost.size();
+	if(k >= 4){
+	    k /= 4;
+	}
+	
+	for(m = 0; m < k; m++){
 	    i = target_a[idx[m]];
 	    j = target_b[idx[m]];
 	    
 	    if(used[i] || used[j]){
 		continue;
 	    }
-	    
-	    //printf("%lu %lu %d %d\n", clusters[i].gifts.size(), clusters[j].gifts.size(), 
-	    //	   pos_a[idx[m]], pos_b[idx[m]]);
+
+	    aux -= clusters[i].cost + clusters[j].cost;
 	    
 	    clusters[j].gifts.insert(clusters[j].gifts.begin() + pos_b[idx[m]],
 				     clusters[i].gifts[pos_a[idx[m]]]);
@@ -604,27 +633,39 @@ int main(){
 	    clusters[i].weight = get_weight(clusters[i].gifts, weights);
 	    clusters[j].weight = get_weight(clusters[j].gifts, weights);
 	    
-	    clusters[i].cost = tsp_genetic(clusters[i].gifts, coord, north, weights, 100);
-	    clusters[j].cost = tsp_genetic(clusters[j].gifts, coord, north, weights, 100);
+	    clusters[i].cost = tsp_genetic(clusters[i].gifts, coord, north, weights,
+					   SWAP_CONVERGE, SWAP_ATTEMPTS);
+
+	    clusters[j].cost = tsp_genetic(clusters[j].gifts, coord, north, weights,
+					   SWAP_CONVERGE, SWAP_ATTEMPTS);
+
+	    aux += clusters[i].cost + clusters[j].cost;
+	    maux += swap_cost[idx[m]];
 	    
 	    used[i] = used[j] = 1;
 	}
 
 	total_cost = 0;
 	for(i = 0; i < clusters.size(); i++){
+	    if(clusters[i].gifts.size() == 0){
+		clusters.erase(clusters.begin() + i);
+		printf("Deleted\n");
+	    }
+
 	    total_cost += clusters[i].cost;
 	}
 	
-	fprintf(stderr, "\t%12.0lf\n", total_cost);
-    }
-
-    // Output result
-    FILE *fp_route = fopen("submission.csv", "w");
-    fprintf(fp_route, "TripId,GiftId\n");
-    for(i = 0; i < clusters.size(); i++){
-	for(j = 0; j < clusters[i].gifts.size(); j++){
-	    fprintf(fp_route, "%d,%d\n", i, clusters[i].gifts[j] + 1);
+	 // Output result
+	FILE *fp_route = fopen("submission.csv", "w");
+	fprintf(fp_route, "TripId,GiftId\n");
+	for(i = 0; i < clusters.size(); i++){
+	    for(j = 0; j < clusters[i].gifts.size(); j++){
+		fprintf(fp_route, "%d,%d\n", i, clusters[i].gifts[j] + 1);
+	    }
 	}
+	fclose(fp_route);
+
+	fprintf(stderr, "\t%12.0lf %10.0lf %10.0lf\n", total_cost, aux, maux);
     }
 
     return 0;
