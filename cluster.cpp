@@ -5,6 +5,7 @@
 #include <cmath>
 #include <ctime>
 #include <cstring>
+#include <sys/stat.h>
 using namespace std;
 
 const double EPS = 1e-6;
@@ -338,6 +339,8 @@ int main(){
 	coord[i][1] *= M_PI/180.0;
     }
 
+    mkdir("submission", 0775);
+
     // Initialize
     int used[N_GIFTS];
     double total_cost;
@@ -527,7 +530,7 @@ int main(){
     }
 
     int min_p, min_k, epoch;
-    double dist[N_GIFTS];
+    double dist[N_GIFTS], decrease;
 
     for(epoch = 0; epoch < SWAP_EPOCHS; epoch++){
 	fprintf(stderr, "S%02d ", epoch);
@@ -607,14 +610,13 @@ int main(){
 	for(i = 0; i < clusters.size(); i++){
 	    used[i] = 0;
 	}
-	
-	double aux = 0, maux = 0;
 
 	k = swap_cost.size();
 	if(k >= 4){
 	    k /= 4;
 	}
 	
+	decrease = 0;
 	for(m = 0; m < k; m++){
 	    i = target_a[idx[m]];
 	    j = target_b[idx[m]];
@@ -623,7 +625,7 @@ int main(){
 		continue;
 	    }
 
-	    aux -= clusters[i].cost + clusters[j].cost;
+	    decrease -= clusters[i].cost + clusters[j].cost;
 	    
 	    clusters[j].gifts.insert(clusters[j].gifts.begin() + pos_b[idx[m]],
 				     clusters[i].gifts[pos_a[idx[m]]]);
@@ -639,9 +641,8 @@ int main(){
 	    clusters[j].cost = tsp_genetic(clusters[j].gifts, coord, north, weights,
 					   SWAP_CONVERGE, SWAP_ATTEMPTS);
 
-	    aux += clusters[i].cost + clusters[j].cost;
-	    maux += swap_cost[idx[m]];
-	    
+	    decrease += clusters[i].cost + clusters[j].cost;
+
 	    used[i] = used[j] = 1;
 	}
 
@@ -649,23 +650,25 @@ int main(){
 	for(i = 0; i < clusters.size(); i++){
 	    if(clusters[i].gifts.size() == 0){
 		clusters.erase(clusters.begin() + i);
-		printf("Deleted\n");
 	    }
 
 	    total_cost += clusters[i].cost;
 	}
+
+	fprintf(stderr, "\t%12.0lf %10.0lf\n", total_cost, decrease);
 	
 	 // Output result
-	FILE *fp_route = fopen("submission.csv", "w");
-	fprintf(fp_route, "TripId,GiftId\n");
+	char fname[64];
+	sprintf(fname, "submission/%03d.csv", epoch);
+
+	FILE *fp_result = fopen(fname, "w");
+	fprintf(fp_result, "TripId,GiftId\n");
 	for(i = 0; i < clusters.size(); i++){
 	    for(j = 0; j < clusters[i].gifts.size(); j++){
-		fprintf(fp_route, "%d,%d\n", i, clusters[i].gifts[j] + 1);
+		fprintf(fp_result, "%d,%d\n", i, clusters[i].gifts[j] + 1);
 	    }
 	}
-	fclose(fp_route);
-
-	fprintf(stderr, "\t%12.0lf %10.0lf %10.0lf\n", total_cost, aux, maux);
+	fclose(fp_result);
     }
 
     return 0;
