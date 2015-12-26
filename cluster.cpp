@@ -37,6 +37,7 @@ const int SPLIT_ATTEMPTS = 5;
 const int NEIGHBOURS = 256;
 const int MOVE_JITTER = 3;
 const int SWAP_JITTER = 1;
+const int USE_SWAP = true;
 const int SWAP_CONVERGE = 100;
 const int SWAP_ATTEMPTS = 3;
 
@@ -539,30 +540,32 @@ int swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
 		}
 		
 		// Swap
-		for(t = max(p - SWAP_JITTER, 0); t <= p + SWAP_JITTER && t < clusters[j].gifts.size(); t++){
-		    if(clusters[i].weight - weights[clusters[i].gifts[k]] + weights[clusters[j].gifts[t]] > MAX_WEIGHT ||
-		       clusters[j].weight - weights[clusters[j].gifts[t]] + weights[clusters[i].gifts[k]] > MAX_WEIGHT){
-			continue;
-		    }
-
-		    route_c = clusters[i].gifts;
-		    route_b = clusters[j].gifts;
-		    
-		    swap(route_c[k], route_b[t]);
-
-		    cost_c = get_weariness(route_c, coord, north, weights);
-		    cost_b = get_weariness(route_b, coord, north, weights);
-
-		    cost = cost_c + cost_b - (clusters[i].cost + clusters[j].cost);
-
-		    if(cost < 0){
-			swap_cost.push_back(cost);
-			target_a.push_back(i);
-			target_b.push_back(j);
-			pos_a.push_back(k);
-			pos_b.push_back(t);
-			nn.push_back(m);
-			op.push_back(1);
+		if(USE_SWAP){
+		    for(t = max(p - SWAP_JITTER, 0); t <= p + SWAP_JITTER && t < clusters[j].gifts.size(); t++){
+			if(clusters[i].weight - weights[clusters[i].gifts[k]] + weights[clusters[j].gifts[t]] > MAX_WEIGHT ||
+			   clusters[j].weight - weights[clusters[j].gifts[t]] + weights[clusters[i].gifts[k]] > MAX_WEIGHT){
+			    continue;
+			}
+			
+			route_c = clusters[i].gifts;
+			route_b = clusters[j].gifts;
+			
+			swap(route_c[k], route_b[t]);
+			
+			cost_c = get_weariness(route_c, coord, north, weights);
+			cost_b = get_weariness(route_b, coord, north, weights);
+			
+			cost = cost_c + cost_b - (clusters[i].cost + clusters[j].cost);
+			
+			if(cost < 0){
+			    swap_cost.push_back(cost);
+			    target_a.push_back(i);
+			    target_b.push_back(j);
+			    pos_a.push_back(k);
+			    pos_b.push_back(t);
+			    nn.push_back(m);
+			    op.push_back(1);
+			}
 		    }
 		}
 	    }
@@ -734,7 +737,7 @@ int main(){
 	}
     }
 
-    printf("\tSTR\t\t%12.0lf\n", total_cost);
+    fprintf(stderr, "\tSTR\t\t%12.0lf\n", total_cost);
 
     if(RESTART){
 	// Initial routing
