@@ -28,14 +28,15 @@ const int MAGIC_GIFTS = 67;
 const double MAGIC_LAT = -52.0 / 180.0 * M_PI;
 const double MAGIC_LON = -105.0 / 180.0 * M_PI;
 
-const int TSP_CONVERGE = 1000;
-const int TSP_ATTEMPTS = 10;
+const int TSP_CONVERGE = 100;
+const int TSP_ATTEMPTS = 1;
 
 const int SPLIT_CONVERGE = 10;
-const int SPLIT_ATTEMPTS = 5;
+const int SPLIT_ATTEMPTS = 1;
 
-const int SWAP_EPOCHS = 5;
-const int NEIGHBOURS = 64;
+const int NEIGHBOURS = 256;
+const int MOVE_JITTER = 3;
+const int SWAP_JITTER = 1;
 const int SWAP_CONVERGE = 100;
 const int SWAP_ATTEMPTS = 3;
 
@@ -81,30 +82,6 @@ inline double get_weariness(vector<int> &gifts, double coord[][2],
     }
 
     weariness += north[gifts[n_gifts - 1]] * SLEIGH_WEIGHT;
-
-    return weariness;
-}
-
-inline double get_weariness(vector<int> &gifts, map< int, map<int, double> > &dist,
-			    double north[], double weights[]){
-    
-    int i, n_gifts = gifts.size();
-    double weariness, weight;
-
-    weight = SLEIGH_WEIGHT;
-    for(i = 0; i < n_gifts; i++){
-	weight += weights[gifts[i]];
-    }
-
-    weariness = weight * north[gifts[0]];
-    weight -= weights[gifts[0]];
-
-    for(i = 1; i < n_gifts; i++){
-	weariness += dist[gifts[i]][gifts[i-1]] * weight;
-	weight -= weights[gifts[i]];
-    }
-
-    weariness += north[gifts[n_gifts-1]] * SLEIGH_WEIGHT;
 
     return weariness;
 }
@@ -503,127 +480,91 @@ void split(vector<Cluster> &clusters, double coord[][2], double north[],
 
 }
 
-double swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
-		  double weights[], double &total_cost){
-
-    int i, j, k, p, m, progbar, min_p, min_k, min_op;
-    int idx[N_GIFTS], used[N_GIFTS];
-    double dist[N_GIFTS], decrease, min_cost, cost_a, cost_b;
-    vector<int> route_a, route_b;
+int swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
+		  double weights[], int neighbours[][NEIGHBOURS], double &total_cost){
 
     fprintf(stderr, "\tSWP ");
-	
-    for(i = 0; i < clusters.size(); i++){
-	clusters[i].center[0] = 0;
-	clusters[i].center[1] = 0;
-	
-	for(j = 0; j < clusters[i].gifts.size(); j++){
-	    clusters[i].center[0] += coord[clusters[i].gifts[j]][0];
-	    clusters[i].center[1] += coord[clusters[i].gifts[j]][1];
-	}
-	
-	clusters[i].center[0] /= clusters[i].gifts.size();
-	clusters[i].center[1] /= clusters[i].gifts.size();
-    }
 
-    vector<int> target_a, target_b, pos_a, pos_b, op, nn;
+    int i, j, k, p, m, t, progbar, target;
+    int used[N_GIFTS], gift_cluster[N_GIFTS], gift_position[N_GIFTS];
+    double dist[N_GIFTS], cost, cost_a, cost_b, cost_c;
+    vector<int> route_a, route_b, route_c, target_a, target_b, pos_a, pos_b, op, nn, idx;
     vector<double> swap_cost;
+
+    for(i = 0; i < clusters.size(); i++){
+	for(j = 0; j < clusters[i].gifts.size(); j++){
+	    gift_cluster[clusters[i].gifts[j]] = i;
+	    gift_position[clusters[i].gifts[j]] = j;
+	}
+    }
     
     progbar = 1;
     for(i = 0; i < clusters.size(); i++){
-	// Distance to neighbours
-	for(j = 0; j < clusters.size(); j++){
-	    if(i != j){
-		dist[j] = haversine(clusters[i].center, clusters[j].center);
-	    } else {
-		dist[j] = 2 * M_PI * EARTH_RADIUS;
-	    }
-	    
-	    idx[j] = j;
-	}
-	
-	// Find the closest neighbours
-	nth_element(idx, idx+NEIGHBOURS, idx+clusters.size(), [&dist](int a, int b) 
-		    {return dist[a] < dist[b];});
-	
-	for(m = 0; m < NEIGHBOURS; m++){
-	    j = idx[m];
+	for(k = 0; k < clusters[i].gifts.size(); k++){
+	    // Swap
+	    route_a = clusters[i].gifts;
+	    route_a.erase(route_a.begin() + k);
+		
+	    cost_a = get_weariness(route_a, coord, north, weights);
 
-	    // Precompute the distances
-	    map< int, map<int, double> > dist;
-	    vector<int> gifts;
+	    for(m = 0; m < NEIGHBOURS; m++){
+		target = neighbours[clusters[i].gifts[k]][m];
+		
+		j = gift_cluster[target];
+		p = gift_position[target];
 
-	    gifts = clusters[i].gifts;
-	    gifts.insert(gifts.end(), clusters[j].gifts.begin(), clusters[j].gifts.end());
-
-	    for(k = 0; k < gifts.size(); k++){
-		for(p = k + 1; p < gifts.size(); p++){
-		    dist[gifts[k]][gifts[p]] = dist[gifts[p]][gifts[k]] = haversine(coord[gifts[k]], coord[gifts[p]]);
-		}
-	    }
-
-	    
-	    min_cost = clusters[i].cost + clusters[j].cost;
-	    
-	    // Move
-	    for(k = 0; k < clusters[i].gifts.size(); k++){
-		if(clusters[j].weight + weights[clusters[i].gifts[k]] > MAX_WEIGHT){
+		if(i == j){
 		    continue;
 		}
-		
-		route_a = clusters[i].gifts;
-		route_a.erase(route_a.begin() + k);
-		
-		cost_a = get_weariness(route_a, dist, north, weights);
-		
-		for(p = 0; p < clusters[j].gifts.size(); p++){
-		    route_b = clusters[j].gifts;
-		    route_b.insert(route_b.begin() + p, clusters[i].gifts[k]);
-		    
-		    cost_b = get_weariness(route_b, dist, north, weights);
-		    
-		    if(cost_a + cost_b < min_cost){
-			min_cost = cost_a + cost_b;
-			min_k = k;
-			min_p = p;
-			min_op = 0;
+	    
+		// Move
+		if(clusters[j].weight + weights[clusters[i].gifts[k]] <= MAX_WEIGHT){
+		    for(t = max(p - MOVE_JITTER, 0); t <= p + MOVE_JITTER + 1 && t <= clusters[j].gifts.size(); t++){
+			route_b = clusters[j].gifts;
+			route_b.insert(route_b.begin() + t, clusters[i].gifts[k]);
+			
+			cost_b = get_weariness(route_b, coord, north, weights);
+			cost = cost_a + cost_b - (clusters[i].cost + clusters[j].cost);
+			
+			if(cost < 0){
+			    swap_cost.push_back(cost);
+			    target_a.push_back(i);
+			    target_b.push_back(j);
+			    pos_a.push_back(k);
+			    pos_b.push_back(t);
+			    nn.push_back(m);
+			    op.push_back(0);
+			}
 		    }
 		}
-	    }
-
-	    // Switch
-	    for(k = 0; k < clusters[i].gifts.size(); k++){
-		for(p = 0; p < clusters[j].gifts.size(); p++){
-		    if(clusters[i].weight - weights[clusters[i].gifts[k]] + weights[clusters[j].gifts[p]] > MAX_WEIGHT ||
-		       clusters[j].weight - weights[clusters[j].gifts[p]] + weights[clusters[i].gifts[k]] > MAX_WEIGHT){
+		
+		// Swap
+		for(t = max(p - SWAP_JITTER, 0); t <= p + SWAP_JITTER && t < clusters[j].gifts.size(); t++){
+		    if(clusters[i].weight - weights[clusters[i].gifts[k]] + weights[clusters[j].gifts[t]] > MAX_WEIGHT ||
+		       clusters[j].weight - weights[clusters[j].gifts[t]] + weights[clusters[i].gifts[k]] > MAX_WEIGHT){
 			continue;
 		    }
 
-		    route_a = clusters[i].gifts;
+		    route_c = clusters[i].gifts;
 		    route_b = clusters[j].gifts;
-
-		    swap(route_a[k], route_b[p]);
-
-		    cost_a = get_weariness(route_a, dist, north, weights);
-		    cost_b = get_weariness(route_b, dist, north, weights);
 		    
-		    if(cost_a + cost_b < min_cost){
-			min_cost = cost_a + cost_b;
-			min_k = k;
-			min_p = p;
-			min_op = 1;
+		    swap(route_c[k], route_b[t]);
+
+		    cost_c = get_weariness(route_c, coord, north, weights);
+		    cost_b = get_weariness(route_b, coord, north, weights);
+
+		    cost = cost_c + cost_b - (clusters[i].cost + clusters[j].cost);
+
+		    if(cost < 0){
+			swap_cost.push_back(cost);
+			target_a.push_back(i);
+			target_b.push_back(j);
+			pos_a.push_back(k);
+			pos_b.push_back(t);
+			nn.push_back(m);
+			op.push_back(1);
 		    }
 		}
-	    }
-	    
-	    if(min_cost < clusters[i].cost + clusters[j].cost){
-		swap_cost.push_back(min_cost - (clusters[i].cost + clusters[j].cost));
-		target_a.push_back(i);
-		target_b.push_back(j);
-		pos_a.push_back(min_k);
-		pos_b.push_back(min_p);
-		nn.push_back(m);
-		op.push_back(min_op);
 	    }
 	}
 	
@@ -632,12 +573,12 @@ double swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
 	    progbar++;
 	}
     }
-	
+    
     for(i = 0; i < swap_cost.size(); i++){
-	idx[i] = i;
+	idx.push_back(i);
     }
     
-    sort(idx, idx+swap_cost.size(), [&swap_cost](int a, int b){
+    sort(idx.begin(), idx.end(), [&swap_cost, &op](int a, int b){
 	    return swap_cost[a] < swap_cost[b];
 	});
     
@@ -646,6 +587,7 @@ double swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
     }
 
     int nn_hist[NEIGHBOURS], op_hist[2];
+    double decrease;
 
     op_hist[0] = op_hist[1] = 0;
     for(i = 0; i < NEIGHBOURS; i++){
@@ -654,25 +596,26 @@ double swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
     
     decrease = 0;
     for(m = 0; m < swap_cost.size(); m++){
-	i = target_a[idx[m]];
-	j = target_b[idx[m]];
-	
+	k = idx[m];
+	i = target_a[k];
+	j = target_b[k];
+
 	if(used[i] || used[j]){
 	    continue;
 	}
 	
 	decrease -= clusters[i].cost + clusters[j].cost;
 	
-	if(op[idx[m]] == 0){
-	    clusters[j].gifts.insert(clusters[j].gifts.begin() + pos_b[idx[m]],
-				     clusters[i].gifts[pos_a[idx[m]]]);
+	if(op[k] == 0){
+	    clusters[j].gifts.insert(clusters[j].gifts.begin() + pos_b[k],
+				     clusters[i].gifts[pos_a[k]]);
 	    
-	    clusters[i].gifts.erase(clusters[i].gifts.begin() + pos_a[idx[m]]);
+	    clusters[i].gifts.erase(clusters[i].gifts.begin() + pos_a[k]);
 	} else {
-	    swap(clusters[i].gifts[pos_a[idx[m]]], clusters[j].gifts[pos_b[idx[m]]]);
+	    swap(clusters[i].gifts[pos_a[k]], clusters[j].gifts[pos_b[k]]);
 	}
 	
-	op_hist[op[idx[m]]]++;
+	op_hist[op[k]]++;
 
 	clusters[i].weight = get_weight(clusters[i].gifts, weights);
 	clusters[j].weight = get_weight(clusters[j].gifts, weights);
@@ -683,8 +626,8 @@ double swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
 	clusters[j].cost = tsp_genetic(clusters[j].gifts, coord, north, weights,
 				       SWAP_CONVERGE, SWAP_ATTEMPTS);
 	
-	decrease += clusters[i].cost + clusters[j].cost;
-	nn_hist[nn[idx[m]]]++;
+	decrease += clusters[i].cost + clusters[j].cost; 
+	nn_hist[nn[k]]++;
 	
 	used[i] = used[j] = 1;
     }
@@ -705,6 +648,8 @@ double swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
 	fprintf(stderr, " %d", nn_hist[i]);
     }
     fprintf(stderr, "\n");
+
+    return swap_cost.size();
 
 }
 
@@ -822,10 +767,60 @@ int main(){
     }
 
     // Swap gifts among the routes
-    for(i = 0; i < SWAP_EPOCHS; i++){
-	fprintf(stderr, "%d", i);
-	swap_gifts(clusters, coord, north, weights, total_cost);
+    static int neighbours[N_GIFTS][NEIGHBOURS];
+    
+    sprintf(fname, "nn%d", NEIGHBOURS);
+    FILE *fp_nn = fopen(fname, "r");
+    
+    if(fp_nn == NULL){
+	fprintf(stderr, "\tNN  ");
 
+	int idx[N_GIFTS];
+	double dist[N_GIFTS];
+
+	progbar = 1;
+	fp_nn = fopen(fname, "w");
+	for(i = 0; i < N_GIFTS; i++){
+	    for(j = 0; j < N_GIFTS; j++){
+		if(i != j){
+		    dist[j] = haversine(coord[i], coord[j]);
+		} else {
+		    dist[j] = 2 * M_PI * EARTH_RADIUS;
+		}
+		
+		idx[j] = j;
+	    }
+
+	    sort(idx, idx+N_GIFTS, [&dist](int a, int b){
+		    return dist[a] < dist[b];
+		});
+
+	    for(j = 0; j < NEIGHBOURS; j++){
+		neighbours[i][j] = idx[j];
+		fprintf(fp_nn, "%d ", idx[j]);
+	    }
+	    fprintf(fp_nn, "\n");
+	    
+	    if((i+1) / (N_GIFTS/10.0) >= progbar){
+		fprintf(stderr, "|");
+		progbar++;
+	    }
+	}
+	fprintf(stderr, "\n");
+    } else {
+	for(i = 0; i < N_GIFTS; i++){
+	    for(j = 0; j < NEIGHBOURS; j++){
+		fscanf(fp_nn, "%d", &neighbours[i][j]);
+	    }
+	}
+    }
+
+    for(i = 0; ; i++){
+	fprintf(stderr, "%d", i);
+	if(swap_gifts(clusters, coord, north, weights, neighbours, total_cost) == 0){
+	    break;
+	}
+	
 	// Output result
 	sprintf(fname, "submission/%03d.csv", i);
 	output_result(clusters, fname);
