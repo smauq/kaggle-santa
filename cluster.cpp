@@ -28,11 +28,11 @@ const int MAGIC_GIFTS = 67;
 const double MAGIC_LAT = -52.0 / 180.0 * M_PI;
 const double MAGIC_LON = -105.0 / 180.0 * M_PI;
 
-const int TSP_CONVERGE = 100;
-const int TSP_ATTEMPTS = 1;
+const int TSP_CONVERGE = 1000;
+const int TSP_ATTEMPTS = 10;
 
 const int SPLIT_CONVERGE = 10;
-const int SPLIT_ATTEMPTS = 1;
+const int SPLIT_ATTEMPTS = 5;
 
 const int NEIGHBOURS = 256;
 const int MOVE_JITTER = 3;
