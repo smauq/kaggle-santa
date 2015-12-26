@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <vector>
+#include <map>
 #include <algorithm>
 #include <random>
 #include <cmath>
@@ -33,8 +34,8 @@ const int TSP_ATTEMPTS = 10;
 const int SPLIT_CONVERGE = 10;
 const int SPLIT_ATTEMPTS = 5;
 
-const int SWAP_EPOCHS = 100;
-const int NEIGHBOURS = 16;
+const int SWAP_EPOCHS = 5;
+const int NEIGHBOURS = 64;
 const int SWAP_CONVERGE = 100;
 const int SWAP_ATTEMPTS = 3;
 
@@ -80,6 +81,30 @@ inline double get_weariness(vector<int> &gifts, double coord[][2],
     }
 
     weariness += north[gifts[n_gifts - 1]] * SLEIGH_WEIGHT;
+
+    return weariness;
+}
+
+inline double get_weariness(vector<int> &gifts, map< int, map<int, double> > &dist,
+			    double north[], double weights[]){
+    
+    int i, n_gifts = gifts.size();
+    double weariness, weight;
+
+    weight = SLEIGH_WEIGHT;
+    for(i = 0; i < n_gifts; i++){
+	weight += weights[gifts[i]];
+    }
+
+    weariness = weight * north[gifts[0]];
+    weight -= weights[gifts[0]];
+
+    for(i = 1; i < n_gifts; i++){
+	weariness += dist[gifts[i]][gifts[i-1]] * weight;
+	weight -= weights[gifts[i]];
+    }
+
+    weariness += north[gifts[n_gifts-1]] * SLEIGH_WEIGHT;
 
     return weariness;
 }
@@ -481,7 +506,7 @@ void split(vector<Cluster> &clusters, double coord[][2], double north[],
 double swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
 		  double weights[], double &total_cost){
 
-    int i, j, k, p, m, progbar, min_p, min_k;
+    int i, j, k, p, m, progbar, min_p, min_k, min_op;
     int idx[N_GIFTS], used[N_GIFTS];
     double dist[N_GIFTS], decrease, min_cost, cost_a, cost_b;
     vector<int> route_a, route_b;
@@ -501,7 +526,7 @@ double swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
 	clusters[i].center[1] /= clusters[i].gifts.size();
     }
 
-    vector<int> target_a, target_b, pos_a, pos_b;
+    vector<int> target_a, target_b, pos_a, pos_b, op, nn;
     vector<double> swap_cost;
     
     progbar = 1;
@@ -523,9 +548,24 @@ double swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
 	
 	for(m = 0; m < NEIGHBOURS; m++){
 	    j = idx[m];
+
+	    // Precompute the distances
+	    map< int, map<int, double> > dist;
+	    vector<int> gifts;
+
+	    gifts = clusters[i].gifts;
+	    gifts.insert(gifts.end(), clusters[j].gifts.begin(), clusters[j].gifts.end());
+
+	    for(k = 0; k < gifts.size(); k++){
+		for(p = k + 1; p < gifts.size(); p++){
+		    dist[gifts[k]][gifts[p]] = dist[gifts[p]][gifts[k]] = haversine(coord[gifts[k]], coord[gifts[p]]);
+		}
+	    }
+
 	    
 	    min_cost = clusters[i].cost + clusters[j].cost;
 	    
+	    // Move
 	    for(k = 0; k < clusters[i].gifts.size(); k++){
 		if(clusters[j].weight + weights[clusters[i].gifts[k]] > MAX_WEIGHT){
 		    continue;
@@ -534,18 +574,44 @@ double swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
 		route_a = clusters[i].gifts;
 		route_a.erase(route_a.begin() + k);
 		
-		cost_a = get_weariness(route_a, coord, north, weights);
+		cost_a = get_weariness(route_a, dist, north, weights);
 		
 		for(p = 0; p < clusters[j].gifts.size(); p++){
 		    route_b = clusters[j].gifts;
 		    route_b.insert(route_b.begin() + p, clusters[i].gifts[k]);
 		    
-		    cost_b = get_weariness(route_b, coord, north, weights);
+		    cost_b = get_weariness(route_b, dist, north, weights);
 		    
 		    if(cost_a + cost_b < min_cost){
 			min_cost = cost_a + cost_b;
 			min_k = k;
 			min_p = p;
+			min_op = 0;
+		    }
+		}
+	    }
+
+	    // Switch
+	    for(k = 0; k < clusters[i].gifts.size(); k++){
+		for(p = 0; p < clusters[j].gifts.size(); p++){
+		    if(clusters[i].weight - weights[clusters[i].gifts[k]] + weights[clusters[j].gifts[p]] > MAX_WEIGHT ||
+		       clusters[j].weight - weights[clusters[j].gifts[p]] + weights[clusters[i].gifts[k]] > MAX_WEIGHT){
+			continue;
+		    }
+
+		    route_a = clusters[i].gifts;
+		    route_b = clusters[j].gifts;
+
+		    swap(route_a[k], route_b[p]);
+
+		    cost_a = get_weariness(route_a, dist, north, weights);
+		    cost_b = get_weariness(route_b, dist, north, weights);
+		    
+		    if(cost_a + cost_b < min_cost){
+			min_cost = cost_a + cost_b;
+			min_k = k;
+			min_p = p;
+			min_op = 1;
 		    }
 		}
 	    }
@@ -556,6 +622,8 @@ double swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
 		target_b.push_back(j);
 		pos_a.push_back(min_k);
 		pos_b.push_back(min_p);
+		nn.push_back(m);
+		op.push_back(min_op);
 	    }
 	}
 	
@@ -576,14 +644,16 @@ double swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
     for(i = 0; i < clusters.size(); i++){
 	used[i] = 0;
     }
-    
-    k = swap_cost.size();
-    if(k >= 2){
-	k /= 2;
+
+    int nn_hist[NEIGHBOURS], op_hist[2];
+
+    op_hist[0] = op_hist[1] = 0;
+    for(i = 0; i < NEIGHBOURS; i++){
+	nn_hist[i] = 0;
     }
     
     decrease = 0;
-    for(m = 0; m < k; m++){
+    for(m = 0; m < swap_cost.size(); m++){
 	i = target_a[idx[m]];
 	j = target_b[idx[m]];
 	
@@ -593,11 +663,17 @@ double swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
 	
 	decrease -= clusters[i].cost + clusters[j].cost;
 	
-	clusters[j].gifts.insert(clusters[j].gifts.begin() + pos_b[idx[m]],
-				 clusters[i].gifts[pos_a[idx[m]]]);
+	if(op[idx[m]] == 0){
+	    clusters[j].gifts.insert(clusters[j].gifts.begin() + pos_b[idx[m]],
+				     clusters[i].gifts[pos_a[idx[m]]]);
+	    
+	    clusters[i].gifts.erase(clusters[i].gifts.begin() + pos_a[idx[m]]);
+	} else {
+	    swap(clusters[i].gifts[pos_a[idx[m]]], clusters[j].gifts[pos_b[idx[m]]]);
+	}
 	
-	clusters[i].gifts.erase(clusters[i].gifts.begin() + pos_a[idx[m]]);
-	
+	op_hist[op[idx[m]]]++;
+
 	clusters[i].weight = get_weight(clusters[i].gifts, weights);
 	clusters[j].weight = get_weight(clusters[j].gifts, weights);
 	
@@ -608,6 +684,7 @@ double swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
 				       SWAP_CONVERGE, SWAP_ATTEMPTS);
 	
 	decrease += clusters[i].cost + clusters[j].cost;
+	nn_hist[nn[idx[m]]]++;
 	
 	used[i] = used[j] = 1;
     }
@@ -621,7 +698,13 @@ double swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
 	total_cost += clusters[i].cost;
     }
     
-    fprintf(stderr, "\t%12.0lf %10.0lf\n", total_cost, decrease);
+    fprintf(stderr, "\t%12.0lf %10.0lf |", total_cost, decrease);
+
+    fprintf(stderr, " OP: %d / %d | N:", op_hist[0], op_hist[1]);
+    for(i = 0; i < NEIGHBOURS; i++){
+	fprintf(stderr, " %d", nn_hist[i]);
+    }
+    fprintf(stderr, "\n");
 
 }
 
