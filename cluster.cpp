@@ -334,7 +334,7 @@ void basic_routing(vector<Cluster> &clusters, double coord[][2], double north[],
 
     fprintf(stderr, "\tCLT ");
 
-    int i, j, count, total_used, progbar;
+    int i, count, total_used, progbar;
     int idx[N_GIFTS], region[N_GIFTS], used[N_GIFTS];
 
     for(i = 0; i < N_GIFTS; i++){
@@ -488,7 +488,7 @@ int swap_gifts(vector<Cluster> &clusters, double coord[][2], double north[],
 
     int i, j, k, p, m, t, progbar, target;
     int used[N_GIFTS], gift_cluster[N_GIFTS], gift_position[N_GIFTS];
-    double dist[N_GIFTS], cost, cost_a, cost_b, cost_c;
+    double cost, cost_a, cost_b, cost_c;
     vector<int> route_a, route_b, route_c, target_a, target_b, pos_a, pos_b, op, nn, idx;
     vector<double> swap_cost;
 
@@ -674,7 +674,7 @@ void output_result(vector<Cluster> &clusters, char fname[]){
 
 int main(){
 
-    int i, j, k, progbar;
+    int i, j, progbar;
     double coord[N_GIFTS][2], weights[N_GIFTS], north[N_GIFTS];
     vector<Cluster> clusters;
 
